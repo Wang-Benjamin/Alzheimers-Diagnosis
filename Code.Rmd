@@ -1,0 +1,462 @@
+---
+title: "Predictions on Diagnosis of Alzheimer's Disease"
+author: "Yakun Wang"
+date: "December 8, 2024"
+output:
+  pdf_document: default
+---
+This project aims to leverage machine learning techniques to develop a statistical model that has a good performance in predicting diagnosis of Alzheimer's disease.
+
+Note: The final model is a tuned Gradient Boosting model and predictions were made with it
+
+
+```{r, results='hide'}
+# Relevant library
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(glmnet)
+library(pROC)
+library(MASS)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm) # Gradient Boosting
+library(caret) 
+library(e1071) # SVM
+
+# Load data 
+train <- read_csv("train.csv")
+test <- read_csv("test.csv")
+```
+
+
+```{r, results='hide'}
+# Clean the train data set by removing two irrelevant features
+cleaned_train <- train %>% dplyr::select(-PatientID, -DoctorInCharge)
+
+# Perform an EDA on train data set
+# Number of null observations in each variables
+NULL_values <- colSums(is.na(cleaned_train))
+NULL_values
+
+# Summary of train data set
+summary(cleaned_train)
+
+# Plot the relationship between each age group and diagnosis
+age_diagnosis_relationship <- aggregate(Diagnosis ~ Age, data = cleaned_train, mean)
+
+ggplot(age_diagnosis_relationship, aes(x = Age, y = Diagnosis)) +
+  geom_line(color = "black") +
+  geom_point(color = "red") +
+  labs(
+    title = "Relationship Between Age and Diagnosis",
+    x = "Age",
+    y = "Average Diagnosis Value"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.title = element_text(size = 12)
+  )
+
+
+# Plot the relationship between Gender and Diagnosis
+gender_diagnosis_relationship <- aggregate(Diagnosis ~ Gender, data = cleaned_train, mean)
+
+# Replace Gender values directly in the plot: 0 -> Male, 1 -> Female
+gender_diagnosis_relationship$Gender <- ifelse(gender_diagnosis_relationship$Gender == 0, "Male", "Female")
+
+# Plotting the bar chart
+ggplot(gender_diagnosis_relationship, aes(x = Gender, y = Diagnosis, fill = Gender)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  labs(
+    title = "Relationship Between Gender and Diagnosis",
+    x = "Gender",
+    y = "Average Diagnosis Value"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.title = element_text(size = 12),
+    legend.position = "none"
+  ) +
+  scale_fill_manual(values = c("Male" = "cyan3", "Female" = "tomato"))
+
+# Visualize the correlations between numerical features using a Heatmap
+numerical_features <- c("Age", "BMI", "AlcoholConsumption", "PhysicalActivity", 
+                        "DietQuality", "SleepQuality", "SystolicBP", "DiastolicBP", 
+                        "CholesterolTotal", "CholesterolLDL", "CholesterolHDL", 
+                        "CholesterolTriglycerides", "MMSE", "FunctionalAssessment", "ADL")
+data_subset <- cleaned_train[, numerical_features]
+cor_matrix <- cor(data_subset, use = "complete.obs")
+cor_melt <- melt(cor_matrix)
+
+ggplot(data = cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, 
+                       limit = c(-1, 1), space = "Lab", 
+                       name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = "Correlation Heatmap", x = "", y = "")
+```
+
+
+```{r, results='hide'}
+# EDA (continue)
+# Categorical variables
+a1=ggplot(data=cleaned_train, aes(x=Ethnicity, fill=factor(Diagnosis))) + geom_bar()
+a2=ggplot(data=cleaned_train, aes(x=EducationLevel, fill=factor(Diagnosis))) + geom_bar()
+a3=ggplot(data=cleaned_train, aes(x=Smoking, fill=factor(Diagnosis))) + geom_bar()
+a4=ggplot(data=cleaned_train, aes(x=FamilyHistoryAlzheimers, fill=factor(Diagnosis))) + geom_bar()
+ggarrange(a1,a2,a3,a4, ncol = 2, nrow = 2)
+
+a5=ggplot(data=cleaned_train, aes(x=CardiovascularDisease, fill=factor(Diagnosis))) + geom_bar()
+a6=ggplot(data=cleaned_train, aes(x=Diabetes, fill=factor(Diagnosis))) + geom_bar()
+a7=ggplot(data=cleaned_train, aes(x=Depression, fill=factor(Diagnosis))) + geom_bar()
+a8=ggplot(data=cleaned_train, aes(x=HeadInjury, fill=factor(Diagnosis))) + geom_bar()
+ggarrange(a5,a6,a7,a8, ncol = 2, nrow = 2)
+
+a9=ggplot(data=cleaned_train, aes(x=Hypertension, fill=factor(Diagnosis))) + geom_bar()
+a10=ggplot(data=cleaned_train, aes(x=MemoryComplaints, fill=factor(Diagnosis))) + geom_bar()
+a11=ggplot(data=cleaned_train, aes(x=BehavioralProblems, fill=factor(Diagnosis))) + geom_bar()
+a12=ggplot(data=cleaned_train, aes(x=Confusion, fill=factor(Diagnosis))) + geom_bar()
+ggarrange(a9,a10,a11,a12, ncol = 2, nrow = 2)
+
+a13=ggplot(data=cleaned_train, aes(x=Disorientation, fill=factor(Diagnosis))) + geom_bar()
+a14=ggplot(data=cleaned_train, aes(x=PersonalityChanges, fill=factor(Diagnosis))) + geom_bar()
+a15=ggplot(data=cleaned_train, aes(x=DifficultyCompletingTasks, fill=factor(Diagnosis))) + geom_bar()
+a16=ggplot(data=cleaned_train, aes(x=Forgetfulness, fill=factor(Diagnosis))) + geom_bar()
+ggarrange(a13,a14,a15,a16, ncol = 2, nrow = 2)
+```
+
+
+```{r, results='hide'}
+# EDA (continue)
+# Detect outliers for each numerical variables
+count_outliers <- function(data, column) {
+  Q1 <- quantile(data[[column]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(data[[column]], 0.75, na.rm = TRUE)
+  IQR_value <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_value
+  upper_bound <- Q3 + 1.5 * IQR_value
+  num_outliers <- sum(data[[column]] < lower_bound | data[[column]] > upper_bound, na.rm = TRUE)
+  return(num_outliers)
+}
+
+# List of numerical features
+numerical_features <- c("Age", "BMI", "AlcoholConsumption", "PhysicalActivity", 
+                        "DietQuality", "SleepQuality", "SystolicBP", "DiastolicBP", 
+                        "CholesterolTotal", "CholesterolLDL", "CholesterolHDL", 
+                        "CholesterolTriglycerides", "MMSE", "FunctionalAssessment", "ADL")
+
+outliers_table <- data.frame(Variable = character(), Outliers = numeric(), stringsAsFactors = FALSE)
+
+# Count outliers for each numerical variable
+for (feature in numerical_features) {
+  num_outliers <- count_outliers(cleaned_train, feature)
+  outliers_table <- rbind(outliers_table, data.frame(Variable = feature, Outliers = num_outliers))
+}
+print(outliers_table)
+```
+
+
+```{r, results='hide'}
+# Initial Model Fitting -- Logistic Regression using cleaned train data set
+int_model <- glm(as.factor(Diagnosis) ~ ., data = cleaned_train, family = "binomial")
+summary(int_model)
+
+# Use LASSO to do model selection
+x <- as.matrix(cleaned_train[,-which(colnames(cleaned_train) == "Diagnosis")]) # predictors matrix
+y <- cleaned_train$Diagnosis
+
+cv.out = cv.glmnet(x, y, family = "binomial", type.measure = "class", alpha = 0.5)
+best.lambda <- cv.out$lambda.1se
+co <- coef(cv.out, s = "lambda.1se")
+
+thresh <- 0.00
+# select variables #
+inds <- which(abs(co) > thresh )
+variables <- row.names(co)[inds]
+sel.var.lasso <- variables[!(variables %in% '(Intercept)')]
+sel.var.lasso
+
+# Reduced model by LASSO method
+model_lasso <- glm(as.factor(Diagnosis) ~ MMSE + FunctionalAssessment + MemoryComplaints + BehavioralProblems + ADL, data = cleaned_train, family = "binomial")
+
+# Model evaluation with ROC curve
+predictions_lasso = predict(model_lasso, train, type="response")
+roc_curve_lasso <- roc(y, predictions_lasso)
+plot(roc_curve_lasso, main = "ROC Curve")
+auc(roc_curve_lasso)
+```
+
+
+```{r, results='hide'}
+# Use Stepwise selection with AIC to do model selection
+model_AIC <- stepAIC(int_model, direction="both", k=2)
+summary(model_AIC)
+# Model evaluation with ROC curve
+predictions_aic = predict(model_AIC, train, type="response")
+roc_curve_aic <- roc(y, predictions_aic)
+plot(roc_curve_aic, main = "ROC Curve")
+auc(roc_curve_aic)
+
+# Use Stepwise selection with BIC to do model selection
+n <- nrow(cleaned_train)
+model_BIC <- stepAIC(int_model, direction="both", k=log(n))
+summary(model_BIC)
+# Model evaluation with ROC curve
+predictions_bic = predict(model_BIC, train, type="response")
+roc_curve_bic <- roc(y, predictions_bic)
+plot(roc_curve_bic, main = "ROC Curve")
+auc(roc_curve_bic)
+```
+
+
+```{r, results='hide'}
+# Quadratic Discriminant Analysis (QDA)
+coretrain_data <- subset(train, select = c(Diagnosis, MMSE, FunctionalAssessment, 
+                                      MemoryComplaints, BehavioralProblems,
+                                      ADL))
+
+da2train_data <- subset(train, select = c(Diagnosis, MMSE, FunctionalAssessment, 
+                                      MemoryComplaints, BehavioralProblems,
+                                      ADL, Age, PhysicalActivity, DietQuality))
+# Model fitting
+qda_model <- qda(Diagnosis ~ ., data = coretrain_data)
+qda2_model <- qda(Diagnosis ~ ., data = da2train_data)
+
+# Make predictions on the test set
+qda_predictions <- predict(qda_model, test)
+qda2_predictions <- predict(qda2_model, test)
+
+qda_pred <- data.frame(PatientID = test$PatientID, Diagnosis = qda_predictions$class)
+qda2_pred <- data.frame(PatientID = test$PatientID, Diagnosis = qda2_predictions$class)
+
+write.csv(qda_pred, "qda_prediction.csv", row.names = FALSE)
+write.csv(qda2_pred, "qda2_prediction.csv", row.names = FALSE)
+```
+
+
+```{r, results='hide'}
+# SVM
+# Fit SVM with a radial kernel
+svm_model <- svm(as.factor(Diagnosis) ~ MMSE + FunctionalAssessment + MemoryComplaints + BehavioralProblems + ADL,
+  data = cleaned_train,
+  kernel = "radial",   # Radial Basis Function (RBF) kernel
+  cost = 1,            # Regularization parameter
+  gamma = 1            # Kernel coefficient
+)
+
+tune_out = tune(svm, as.factor(Diagnosis) ~ MMSE + FunctionalAssessment + MemoryComplaints + BehavioralProblems 
+                + ADL, data =cleaned_train, kernel = "radial",
+                ranges = list(cost = c(0.1,1,10,100,1000), gamma = c(0.5,1,2,3,4)))
+best_svm = tune_out$best.model
+
+# Predict the outcomes
+svm_predictions <- predict(best_svm, newdata = test)
+output <- data.frame(PatientID = test$PatientID, Diagnosis = svm_predictions)
+write.csv(output, "Predicted_Diagnosis_svm.csv", row.names = FALSE)
+```
+
+
+```{r, results='hide'}
+# Decision Tree with Variables Selected by StepwiseAIC
+# Fit a decision tree
+tree_model <- rpart(as.factor(Diagnosis) ~ SleepQuality + MMSE + FunctionalAssessment + 
+                    MemoryComplaints + BehavioralProblems + ADL,
+                    data = cleaned_train, method = "class", 
+                    control = rpart.control(minsplit = 20, cp=0.01))
+
+# Plot the tree
+rpart.plot(tree_model, type = 3, extra = 104, fallen.leaves = TRUE, main = "Decision Tree for Diagnosis")
+
+# Predict on the training data
+predictions <- predict(tree_model, cleaned_train, type = "class")
+# Confusion Matrix
+table(Predicted = predictions, Actual = cleaned_train$Diagnosis)
+# Calculate Accuracy
+accuracy <- mean(predictions == cleaned_train$Diagnosis)
+cat("Accuracy:", accuracy, "\n")
+
+# Print the complexity parameter table
+printcp(tree_model)
+
+# Prune the tree at the optimal complexity parameter
+optimal_cp <- tree_model$cptable[which.min(tree_model$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(tree_model, cp = optimal_cp)
+
+# Plot the pruned tree
+rpart.plot(pruned_tree, type = 3, extra = 104, fallen.leaves = TRUE, main = "Pruned Decision Tree")
+```
+
+
+```{r, results='hide'}
+# Build a decision tree using Gini index
+gini_tree <- rpart(as.factor(Diagnosis) ~ SleepQuality + MMSE + FunctionalAssessment + 
+                   MemoryComplaints + BehavioralProblems + ADL,
+                   data = cleaned_train, method = "class", 
+                   parms = list(split = "gini"),
+                   control = rpart.control(minsplit = 20, cp = 0.01))
+rpart.plot(gini_tree, type = 3, extra = 104, fallen.leaves = TRUE, main = "Gini Index Tree")
+printcp(gini_tree)
+# Find optimal CP for pruning (Gini Tree)
+optimal_cp_gini <- gini_tree$cptable[which.min(gini_tree$cptable[, "xerror"]), "CP"]
+
+# Prune the tree
+pruned_gini_tree <- prune(gini_tree, cp = optimal_cp_gini)
+
+# Plot the pruned tree
+rpart.plot(pruned_gini_tree, type = 3, extra = 104, fallen.leaves = TRUE, main = "Pruned Gini Tree")
+```
+
+
+```{r, results='hide'}
+# Build a decision tree using Deviance
+deviance_tree <- rpart(as.factor(Diagnosis) ~ SleepQuality + MMSE + FunctionalAssessment + 
+                       MemoryComplaints + BehavioralProblems + ADL,
+                       data = cleaned_train, method = "class", 
+                       parms = list(split = "information"),
+                       control = rpart.control(minsplit = 20, cp = 0.01))
+rpart.plot(deviance_tree, type = 3, extra = 104, fallen.leaves = TRUE, main = "Deviance Tree")
+
+# Find optimal CP for pruning (Deviance Tree)
+optimal_cp_deviance <- deviance_tree$cptable[which.min(deviance_tree$cptable[, "xerror"]), "CP"]
+
+# Prune the tree
+pruned_deviance_tree <- prune(deviance_tree, cp = optimal_cp_deviance)
+
+# Plot the pruned tree
+rpart.plot(pruned_deviance_tree, type = 3, extra = 104, fallen.leaves = TRUE, main = "Pruned Deviance Tree")
+```
+
+
+```{r, results='hide'}
+# Misclassification Error for Pruned Tree
+pruned_predictions <- predict(pruned_tree, cleaned_train, type = "class")
+pruned_confusion <- table(Predicted = pruned_predictions, Actual = cleaned_train$Diagnosis)
+pruned_error <- 1 - sum(diag(pruned_confusion)) / sum(pruned_confusion)
+cat("Pruned Tree Misclassification Error:", pruned_error, "\n")
+
+# Misclassification Error for Pruned Gini Tree
+pruned_gini_predictions <- predict(pruned_gini_tree, cleaned_train, type = "class")
+pruned_gini_confusion <- table(Predicted = pruned_gini_predictions, Actual = cleaned_train$Diagnosis)
+pruned_gini_error <- 1 - sum(diag(pruned_gini_confusion)) / sum(pruned_gini_confusion)
+cat("Pruned Gini Tree Misclassification Error:", pruned_gini_error, "\n")
+
+# Misclassification Error for Pruned Deviance Tree
+pruned_deviance_predictions <- predict(pruned_deviance_tree, cleaned_train, type = "class")
+pruned_deviance_confusion <- table(Predicted = pruned_deviance_predictions, Actual = cleaned_train$Diagnosis)
+pruned_deviance_error <- 1 - sum(diag(pruned_deviance_confusion)) / sum(pruned_deviance_confusion)
+cat("Pruned Deviance Tree Misclassification Error:", pruned_deviance_error, "\n")
+```
+
+
+```{r, results='hide'}
+# Fit a decision tree with all variables and calculate the importance of each variable.
+tree_model_all <- rpart(as.factor(Diagnosis) ~ ., data = cleaned_train, method = "class")
+
+# Extract variable importance
+importance <- tree_model_all$variable.importance
+importance
+```
+
+
+```{r, results='hide'}
+# Fit a Random Forest model with variables that has an importance over 6
+rf_model <- randomForest(as.factor(Diagnosis) ~ PhysicalActivity + DietQuality + Age + CholesterolTriglycerides +
+                           CholesterolTotal + BMI + SleepQuality + MMSE + FunctionalAssessment + MemoryComplaints
+                         + BehavioralProblems + ADL, data = cleaned_train, ntree = 700)
+print(rf_model)
+
+# Plot variable importance
+varImpPlot(rf_model)
+```
+
+
+```{r, results='hide'}
+# Gradient Boosting model with variables that has an importance over 6
+gbm_model <- gbm((as.numeric(as.factor(cleaned_train$Diagnosis)) - 1) ~ PhysicalActivity + DietQuality + Age +
+                   CholesterolTriglycerides + CholesterolTotal + BMI + SleepQuality + MMSE + FunctionalAssessment
+                 + MemoryComplaints + BehavioralProblems + ADL,
+                 data = cleaned_train,
+                 distribution = "bernoulli",  # For binary classification
+                 n.trees = 2000,              # Number of trees
+                 interaction.depth = 3,      # Depth of each tree
+                 shrinkage = 0.01,           # Learning rate
+                 cv.folds = 5,               # Cross-validation folds
+                 n.minobsinnode = 15)        # Minimum observations per node
+best_trees <- gbm.perf(gbm_model, method = "cv")
+```
+
+
+```{r, results='hide'}
+# Final model - tuned Gradient Boosting model
+# Define cross-validation
+control <- trainControl(method = "cv", number = 5)
+
+# Grid of hyperparameters to tune
+grid <- expand.grid(
+  n.trees = c(500, 1000, 1500, 2000),   # Test different numbers of trees
+  interaction.depth = c(1, 2, 3),       # Test tree depths
+  shrinkage = c(0.001, 0.01, 0.5),          # Test different learning rates
+  n.minobsinnode = c(10, 15, 20, 25)           # Test node sizes
+)
+
+# Train model with caret
+gbm_tuned <- train(as.factor(Diagnosis) ~ MMSE + FunctionalAssessment + MemoryComplaints + 
+                     BehavioralProblems + ADL,
+  data = cleaned_train,
+  method = "gbm",
+  trControl = control,
+  tuneGrid = grid,
+  verbose = FALSE
+)
+
+# Best hyperparameters
+print(gbm_tuned$bestTune)
+```
+
+
+```{r, results='hide'}
+# Performance evaluation and statistical inference on the tuned Gradient Boosting model
+# Variable importance
+importance <- varImp(gbm_tuned)
+print(importance)
+# Plot variable importance
+plot(importance, main = "Variable Importance for GBM")
+
+# Check cross-validation results
+print(gbm_tuned$results)
+
+# Predictions on training data
+gbmtuned_train_predictions <- predict(gbm_tuned, cleaned_train)
+# Confusion matrix
+confusion_matrix <- confusionMatrix(gbmtuned_train_predictions, as.factor(cleaned_train$Diagnosis))
+print(confusion_matrix)
+
+# Tuned GBM AUC
+gbm_probabilities <- predict(gbm_tuned, cleaned_train, type = "prob")
+gbm_roc <- roc(cleaned_train$Diagnosis, gbm_probabilities[, 2])
+plot(gbm_roc, main = "ROC Curve of Tuned Graident Bossting Model")
+auc(gbm_roc)
+
+# Calibration Plot
+calibration_curve <- calibration(as.factor(Diagnosis) ~ predict(gbm_tuned, cleaned_train, type = "prob")[, 2], 
+                                 data = cleaned_train)
+plot(calibration_curve, main = "Calibration Curve")
+```
+
+
+```{r, results='hide'}
+# Use tuned Gradient Boosting model to predict on test data set
+gbmtuned_test_predictions <- predict(gbm_tuned, newdata = test)
+output <- data.frame(PatientID = test$PatientID, Diagnosis = gbmtuned_test_predictions)
+write.csv(output, "Predicted_Diagnosis_gbmtuned.csv", row.names = FALSE)
+```
+
+
