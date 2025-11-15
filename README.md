@@ -7,6 +7,8 @@ This research aims to leverage popular machine learning techniques to make predi
 There are 1504 observations/patients in the training set and 645 observations/patients in the test set. Our goal is to fit various models with the training set, select and keep only siginificant and the most relevant variables in our models, tune and optimize models, and finally obtain a model that shows a good performance on predicting whether a patient from the test set will develop AD based on the selected variables.
 
 ## Technical Summary
+**All coding is implemented in R language.**
+
 **Models utilized in this research:**
   - Logistic Regression
   - Support Vector Machine (SVM)
