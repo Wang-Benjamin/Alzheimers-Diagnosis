@@ -9,7 +9,7 @@ There are 1504 observations/patients in the training set and 645 observations/pa
 ## Technical Summary
 **All coding is implemented in R language.**
 
-**Models utilized in this research:**
+**Models Utilized in Research:**
   - Logistic Regression
   - Support Vector Machine (SVM)
   - Quadratic Discriminant Analysis (QDA)
@@ -22,7 +22,7 @@ There are 1504 observations/patients in the training set and 645 observations/pa
   - Bayesian Information Criterion (BIC)
   - Least Absolute Shrinkage and Selection Operator (LASSO)
 
-**Model Evaluation Metrics**
+**Model Evaluation Metrics:**
   - ROC curve with AUC
   - Calibration Curve
   - Confusion Matrix
